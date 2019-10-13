@@ -1,15 +1,150 @@
-/*=====================Video Routines=====================*/
-
+/*
+@Action: Sets video to *video*
+@Parameters: video=16-bit long value of the desired video mode
+@Output: Old video mode
+@Compatible platforms: MSDOS (*T), FreeDOS (*UT), AppleII+ (*UT+WIP)
+@Compatible video modes: VGA (*T), SVGA (*T), Hercules (*T), EGA (*T), CGA (*T)
+*/
 int16_t _Cdecl setVideo(int16_t video) { /*Sets the video using int 10h*/
+	static int16_t oldVideo;
+	in.h.ah = 0x0F;
+    int86(0x10,&in,&out);
+    oldVideo = out.h.al;
+    if(oldVideo == 0x29) { /*Realtek RTVGA BIOS v3.C10 crashes when switching to mode 0x21 or 0x27*/
+		if(video == 0x21 || video == 0x27) {
+			in.h.ah = 0x00;
+			in.h.al = 0x13;
+			int86(0x10,&in,&out);
+		}
+	}
     in.h.ah = 0x00;
     in.h.al = video;
     int86(0x10,&in,&out);
-    return out.h.al;
+    return oldVideo;
 }
 
-void _Cdecl plotLine(int16_t fx, int16_t fy, int16_t tx, int16_t ty, int8_t color) {
-	int16_t dx,dy,px,py,x,y,i;
-	float sl;
+/*
+@Action: Gets video adapter
+@Parameters: void
+@Output: Video adapter [see below]
+-0 Unknown (probably SVGA)
+-1 AHEAD adapters
+-2 PARADISE adapters
+-3 OAK TECH adapters
+-5 ATI 18800
+-6 ATI 18800-1
+-7 ATI 18800-2
+-8 ATI 18800-4
+-9 ATI 18800-5
+-10 ATI 68800AX
+-11 EGA Wonder
+-12 VGA Wonder
+-13 EGA Wonder8000+
+-14 Genoa 6200/6300
+-15 Genoa 6400/6600
+-16 Genoa 6100
+-17 Genoa 5100/5200
+-18 Genoa 5300/5400
+@Compatible platforms: MSDOS (*T), FreeDOS (*UT), AppleII+ (*UT+WIP)
+@Compatible video modes: VGA (*T), SVGA (*T), Hercules (*T), EGA (*T), CGA (*T)
+*/
+int32_t _Cdecl getVideoAdapter(void) {
+	static uint8_t *ptr;
+	static uint8_t *txt;
+	txt = (uint8_t *)malloc(sizeof(uint8_t)*6);
+	if(txt == NULL) {
+		return -1;
+	}
+	ptr = (uint8_t *)0xC0000025; /*Check for AHEAD adapters*/
+	strcpy(txt,"AHEAD\0"); /*Comparing memory, with string!*/
+	if(memcmp(ptr,txt,5) == 0) {
+		return 1;
+	}
+	txt = (uint8_t *)realloc(txt,sizeof(uint8_t)*5);
+	ptr = (uint8_t *)0xC000007D; /*Check for PARADISE adapters*/
+	strcpy(txt,"VGA=\0"); /*Comparing memory, with string!*/
+	if(memcmp(ptr,txt,5) == 0) {
+		return 2;
+	}
+	txt = (uint8_t *)realloc(txt,sizeof(uint8_t)*8);
+	ptr = (uint8_t *)0xC0000008; /*Check for OAK TECH adapters*/
+	strcpy(txt,"OAK VGA\0"); /*Comparing memory, with string!*/
+	if(memcmp(ptr,txt,5) == 0) {
+		return 3;
+	}
+	txt = (uint8_t *)realloc(txt,sizeof(uint8_t)*10);
+	ptr = (uint8_t *)0xC0000031; /*Check for ATI adapters*/
+	strcpy(txt,"761295520\0"); /*Comparing memory, with string!*/
+	if(memcmp(ptr,txt,5) == 0) {
+		ptr = (uint8_t *)0xC0000043; /*We also have to put the stupid revision*/
+		switch(*ptr) {
+			case 0x31:
+				free(txt);
+				return 5; /*18800*/
+			case 0x32:
+				free(txt);
+				return 6; /*18800-1*/
+			case 0x33:
+				free(txt);
+				return 7; /*18800-2*/
+			case 0x34:
+				free(txt);
+				return 8; /*18800-4*/
+			case 0x35:
+				free(txt);
+				return 9; /*18800-5*/
+			case 0x62:
+				free(txt);
+				return 10; /*68800AX*/
+		}
+		ptr = (uint8_t *)0xC0000040;
+		switch(ptr[0]) {
+			case '2':
+				switch(ptr[1]) {
+					case '2':
+						return 11; /*EGA Wonder*/
+				}
+				break;
+			case '3':
+				switch(ptr[1]) {
+					case '1':
+						return 12; /*VGA Wonder*/
+					case '2':
+						return 13; /*EGA Wonder8000+*/
+				}
+				break;
+		}
+	}
+	free(txt);
+	ptr = (uint8_t *)0xC0000037; /*Genoa Graphics Adapter*/
+	ptr = (uint8_t *)0xC0000000+(*ptr); /*Fuck, what a mess!*/
+	if(ptr[0] == 0x77 && ptr[2] == 0x99 && ptr[3] == 0x66) {
+		switch(ptr[1]) {
+			case 0x00:
+				return 14; /*Genoa 6200/6300*/
+			case 0x11:
+				return 15; /*Genoa 6400/6600*/
+			case 0x22:
+				return 16; /*Genoa 6100*/
+			case 0x33:
+				return 17; /*Genoa 5100/5200*/
+			case 0x55:
+				return 18; /*Genoa 5300/5400*/
+		}
+	}
+	return 0;
+}
+
+/*
+@Action: Plots a line
+@Parameters: fx=from x. fy=from y. tx=to x. ty=to y. color=color (byte)
+@Output: void
+@Compatible platforms: All that plotPixel() can handle
+@Compatible video modes: All that plotPixel() can handle
+*/
+void _Cdecl plotLine(int16_t fx, int16_t fy, int16_t tx, int16_t ty, uint8_t color) {
+	static int16_t dx,dy,px,py,i;
+	static float sl;
 	if(tx >= fx) {
 		dx = tx-fx;
 	}
@@ -27,7 +162,7 @@ void _Cdecl plotLine(int16_t fx, int16_t fy, int16_t tx, int16_t ty, int8_t colo
 		for(i = 0; i != dx; i+= 1) {
 			px = i+fx;
 			py = sl*i+fy;
-			vgaMemory[((py<<8)+(py<<6)+px)] = color;
+			plotPixel(px,py,color);
 		}
 	}
 	else {
@@ -35,22 +170,45 @@ void _Cdecl plotLine(int16_t fx, int16_t fy, int16_t tx, int16_t ty, int8_t colo
 		for(i = 0; i != dy; i+= 1) {
 			py = sl*i+fx;
 			px = i+fy;
-			vgaMemory[((py<<8)+(py<<6)+px)] = color;
+			plotPixel(px,py,color);
 		}
 	}
 	return;
 }
 
-/*=====================Mouse Routines=====================*/
-
-char _Cdecl initMouse(void) {
+/*
+@Action: Initializes mouse
+@Parameters: structure mouse=structure of the mouse, there should be one per program (recommended)
+because this structure will hold all mouses. And i don't think anyone uses more than 2
+bloody mouses.
+@Output: void, but returns overwritten structure *m
+@Compatible platforms: MSDOS (*T), FreeDOS (*UT), AppleII+ (*NDFI)
+@Compatible video modes: VGA (*T), SVGA (*T), Hercules (*UT), EGA (*UT), CGA (*UT)
+*/
+char _Cdecl initMouse(struct mouse *m) {
 	in.x.ax = 0x00;
 	in.x.bx = 0x00;
 	int86(0x33,&in,&out);
+	if((in.x.bx&2) != 0) { /*Two button mouse*/
+        m->buttons = 2;
+	}
+	else if((in.x.bx&3) != 0) { /*Three button mouse*/
+        m->buttons = 3;
+	}
+	else { /*Unknown buttons*/
+        m->buttons = 0;
+	}
 	return (out.x.ax != 0) ? 0 : -1; /*If the mouse was initialized return 0, else return -1*/
 }
 
-void _Cdecl setMousePosition(int16_t x,int16_t y) {
+/*
+@Action: Sets position of mouse
+@Parameters: x=x position. y=y position
+@Output: void
+@Compatible platforms: MSDOS (*T), FreeDOS (*UT), AppleII+ (*NDFI)
+@Compatible video modes: VGA (*T), SVGA (*T), Hercules (*UT), EGA (*UT), CGA (*UT)
+*/
+void _Cdecl setMousePosition(uint16_t x,uint16_t y) {
 	in.x.ax = 0x04;
 	in.x.cx = x;
 	in.x.dx = y;
@@ -58,90 +216,77 @@ void _Cdecl setMousePosition(int16_t x,int16_t y) {
 	return;
 }
 
+/*
+@Action: Shows mouse
+@Parameters: void
+@Output: void
+@Compatible platforms: MSDOS (*T), FreeDOS (*UT), AppleII+ (*NDFI)
+@Compatible video modes: VGA (*T), SVGA (*T), Hercules (*UT), EGA (*UT), CGA (*UT)
+*/
 void _Cdecl showMouse(void) {
 	in.x.ax = 0x01;
 	int86(0x33,&in,&out);
 	return;
 }
 
+/*
+@Action: Hide mouse
+@Parameters: void
+@Output: void
+@Compatible platforms: MSDOS (*T), FreeDOS (*UT), AppleII+ (*NDFI)
+@Compatible video modes: VGA (*T), SVGA (*T), Hercules (*UT), EGA (*UT), CGA (*UT)
+*/
 void _Cdecl hideMouse(void) {
 	in.x.ax = 0x02;
 	int86(0x33,&in,&out);
 	return;
 }
 
-void _Cdecl getMouse(struct mouse *m) {
+/*
+@Action: Get mouse status
+@Parameters: structure mouse=structure of the mouse to write to
+@Output: void, but returns overwritten structure *m
+@Compatible platforms: MSDOS (*T), FreeDOS (*UT), AppleII+ (*NDFI)
+@Compatible video modes: VGA (*T), SVGA (*T), Hercules (*UT), EGA (*UT), CGA (*UT)
+*/
+void _Cdecl getMouseStatus(struct mouse *m) {
 	in.x.ax = 0x03;
 	int86(0x33,&in,&out);
 	m->x = out.x.cx;
 	m->y = out.x.dx;
-	m->buttonLeft = (out.x.bx & 1);
+	m->buttonLeft = (out.x.bx & 1); /*While it is not equal 0, its HOLD/PRESSED, else its RELEASED*/
 	m->buttonRight = (out.x.bx & 2);
 	m->buttonMiddle = (out.x.bx & 4);
 	return;
 }
 
-/*=================Decode/Encode Routines==================*/
 /*
-*WORD	Identifier	Defaults to BM
-*DWORD	Size of file	Size of file, can range from 0 to 65,550
-*DWORD	Reserved	?
-*DWORD	Offset	Offset from the file data
-*DWORD	Header size	The size of the Header, set to 40 [1]
-*DWORD	Wide	Wide of the image
-*DWORD	Tall	Tall of the image
-*WORD	Planes	By default set to 1
-*WORD	Bits per pixel	If set 1 becomes monochrome and each bit is a pixel, if set 4 can have up to 16 colours and each byte are two pixels, 8 to 256 colours and each byte is a pixel, and 28 has up to 2^28
-and has three bytes per pixel, representing Red, Green and Blue respectively
-
-*DWORD	Compression	If set to 0 RLE is enabled. Else it's raw data
-*DWORD	Size of image	Size in bytes of the image
-*DWORD	X px/m	X pixels per meter
-*DWORD	Y px/m	Y pixels per meter
-*DWORD	Number of colors	Number of used colors, max. Depends on bits per pixel
-*DWORD	Important colors	Number of relevant colors, i.e the ones that are used most
+@Action: "redraws" black area left by initialized mouse once a thing has been draw
+@Parameters: structure mouse=structure of the mouse
+@Output: void
+@Compatible platforms: MSDOS (*T), FreeDOS (*UT), AppleII+ (*NDFI)
+@Compatible video modes: VGA (*T), SVGA (*T), Hercules (*UT), EGA (*UT), CGA (*UT)
 */
-
-uint64_t decodeBitmap(FILE *stream, struct bitmap *bmp, uint8_t *palette) {
-    uint8_t *skip; /*Will help us to skip some useless parts*/
-    uint16_t i;
-    uint8_t padding; /*Bitmaps not divisible by 4 are padded*/
-    skip = (uint8_t *)malloc(32);
-    if(skip == NULL) { /*Return 0 on error*/
-        return 0;
-    }
-    fread((uint8_t *)skip,sizeof(uint8_t),15,stream);
-    if(skip[0] != 'B' || skip[1] != 'M') { /*Return 1 on error. Not a valid bitmap*/
-        return 1;
-    }
-    fread((struct bitmap *)bmp->wide,sizeof(uint32_t),1,stream);
-    fread((struct bitmap *)bmp->tall,sizeof(uint32_t),1,stream);
-    printf("Wide: %x - Tall: %x\n",bmp->wide,bmp->tall);
-    printf("%u %u %u %u\n",sizeof(uint8_t),sizeof(uint16_t),sizeof(uint32_t),sizeof(uint64_t));
-    if(bmp->wide == 0 || bmp->tall == 0) {
-        return 1;
-    }
-    /*Allocate data*/
-    bmp->data = (uint8_t *)malloc(bmp->tall*bmp->wide);
-    fread((uint8_t *)skip,sizeof(uint8_t),4,stream);
-    fread((struct bitmap *)bmp->bitsPerPixel,sizeof(uint16_t),1,stream);
-    if(bmp->bitsPerPixel != 8) {
-        printf("VALUE OF BITS PER PIXEL = %u",bmp->bitsPerPixel);
-        return 1;
-    }
-    fread((uint8_t *)skip,sizeof(uint8_t),24,stream);
-    if(palette == NULL) { /*No palette provided, skip it!*/
-        for(i = 0; i < 1024; i++) {
-            fread((uint8_t *)skip[0],sizeof(uint8_t),1,stream);
+void _Cdecl redrawOnMouse(struct mouse *m) {
+    static uint16_t i,i2;
+    for(i = 0; i < 16; i++) {
+        for(i2 = 0; i2 < 16; i2++) {
+            plotPixel(i+(m->x/2),i2+(m->y/2),fetchPixel(i+(m->x/2),i2+(m->y/2)));
         }
     }
-    else {
-        fread(palette,sizeof(uint8_t),1024,stream);
+    return;
+}
+
+/*
+@Action: Skips *n* number of chars
+@Parameters: stream=file stream. n=number of chars to skip
+@Output: void
+@Compatible platforms: MSDOS (*T), FreeDOS (*UT), AppleII+ (*UT)
+*/
+void _Cdecl fskip(FILE *stream, uint64_t n) {
+    static uint64_t i;
+    for(i = 0; i < (n+1); i++) {
+        fgetc(stream); /*Skip characters*/
     }
-    padding = bmp->wide%4;
-    for(i = 0; i < bmp->tall; i++) { /*Read one line at a time*/
-        fread(bmp->data,sizeof(uint8_t),bmp->wide+padding,stream);
-    }
-    free(skip); /*We finished our work, it was time for skip to leave...*/
-    return bmp->wide+(bmp->tall<<16); /*Save tall in higher half of the returned 32 bit integer*/
+    return;
 }
